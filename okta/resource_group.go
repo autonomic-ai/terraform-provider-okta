@@ -5,6 +5,7 @@ import (
 
 	"github.com/okta/okta-sdk-golang/okta"
 
+	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/okta/okta-sdk-golang/okta/query"
 )
@@ -50,18 +51,24 @@ func buildGroup(d *schema.ResourceData) *okta.Group {
 }
 
 func resourceGroupCreate(d *schema.ResourceData, m interface{}) error {
-	group := buildGroup(d)
-	responseGroup, _, err := getOktaClientFromMetadata(m).Group.CreateGroup(*group)
-	if err != nil {
-		return err
-	}
+	return resource.Retry(d.Timeout(schema.TimeoutCreate), func() *resource.RetryError {
+		group := buildGroup(d)
+		responseGroup, _, err := getOktaClientFromMetadata(m).Group.CreateGroup(*group)
+		if err != nil {
+			return resource.RetryableError(err)
+		}
 
-	d.SetId(responseGroup.Id)
-	if err := updateGroupUsers(d, m); err != nil {
-		return err
-	}
+		d.SetId(responseGroup.Id)
+		if err := updateGroupUsers(d, m); err != nil {
+			return resource.NonRetryableError(err)
+		}
 
-	return resourceGroupRead(d, m)
+		if err := resourceGroupRead(d, m); err != nil {
+			return resource.NonRetryableError(err)
+		}
+
+		return nil
+	})
 }
 
 func resourceGroupExists(d *schema.ResourceData, m interface{}) (bool, error) {
@@ -86,23 +93,31 @@ func resourceGroupRead(d *schema.ResourceData, m interface{}) error {
 }
 
 func resourceGroupUpdate(d *schema.ResourceData, m interface{}) error {
-	group := buildGroup(d)
-	_, _, err := getOktaClientFromMetadata(m).Group.UpdateGroup(d.Id(), *group)
-	if err != nil {
-		return err
-	}
+	return resource.Retry(d.Timeout(schema.TimeoutUpdate), func() *resource.RetryError {
+		group := buildGroup(d)
+		_, _, err := getOktaClientFromMetadata(m).Group.UpdateGroup(d.Id(), *group)
+		if err != nil {
+			return resource.RetryableError(err)
+		}
 
-	if err := updateGroupUsers(d, m); err != nil {
-		return err
-	}
+		if err := updateGroupUsers(d, m); err != nil {
+			return resource.NonRetryableError(err)
+		}
 
-	return resourceGroupRead(d, m)
+		if err := resourceGroupRead(d, m); err != nil {
+			return resource.NonRetryableError(err)
+		}
+
+		return nil
+	})
 }
 
 func resourceGroupDelete(d *schema.ResourceData, m interface{}) error {
-	_, err := getOktaClientFromMetadata(m).Group.DeleteGroup(d.Id())
+	return resource.Retry(d.Timeout(schema.TimeoutDelete), func() *resource.RetryError {
+		_, err := getOktaClientFromMetadata(m).Group.DeleteGroup(d.Id())
 
-	return err
+		return resource.RetryableError(err)
+	})
 }
 
 func fetchGroup(d *schema.ResourceData, m interface{}) (*okta.Group, error) {
